@@ -74,13 +74,21 @@ async def create_new_user(usr: Request):
         print(f'user:{username} email: {email}')
         with engine.connect() as conn:
             print("Fetching users...")
-            check_data = conn.execute(text(f"INSERT INTO users (username, email, pswd) VALUES({username},{email},{password})"))
-            conn.commit()
-            if check_data:
-                return{"status":"200", "message":"user added"}                   
-            else:
-                return { "status": "failed", "message": "signup failed" }
-
+            
+            query = text("INSERT INTO users (username, email, pswd) VALUES (:username, :email, :password)")
+            
+            try:
+                conn.execute(query, {
+                    "username": username,
+                    "email": email,
+                    "password": password
+                })
+                conn.commit()
+                return {"status": "200", "message": "user added"}
+                
+            except Exception as e:
+                print("Error:", e)
+                return {"status": "failed", "message": "signup failed"}
     except Exception as e:
         print(e)
         return {'status':"login failed", "message":e}
