@@ -67,7 +67,7 @@ async def login_user(cred: Request):
     
 
 
-@app.post("/signup")
+@app.post('/signup')
 async def create_new_user(usr: Request):
     try:
         cred=await usr.json()
