@@ -70,7 +70,7 @@ async def login_user(cred: Request):
 @app.post("/signup")
 async def create_new_user(usr: Request):
     try:
-        cred=await cred.json()
+        cred=await usr.json()
         print(f'creds:{cred}')
         username=cred.get('username')
         email=cred.get('email')
