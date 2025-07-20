@@ -1,4 +1,4 @@
-from fastapi import FastAPI ,Request
+from fastapi import FastAPI ,Request, Response
 from sqlalchemy import text
 from database import engine 
 from fastapi import  UploadFile, Form, File, Query
@@ -13,6 +13,8 @@ import time
 import os
 import asyncio
 import json
+import io
+
 
 
 app = FastAPI()
@@ -58,6 +60,31 @@ async def login_user(cred: Request):
     except Exception as e:
         print(e)
         return {'status':"login failed", "message":e}
+    
+
+
+@app.post("/signup")
+async def create_new_user(usr: Request):
+    try:
+        cred=await cred.json()
+        print(f'creds:{cred}')
+        username=cred.get('username')
+        email=cred.get('email')
+        password=cred.get('password')
+        print(f'user:{username} email: {email}')
+        with engine.connect() as conn:
+            print("Fetching users...")
+            check_data = conn.execute(text(f"INSERT INTO users (username, email, pswd) VALUES({username},{email},{password})"))
+            conn.commit()
+            if check_data:
+                return{"status":"200", "message":"user added"}                   
+            else:
+                return { "status": "failed", "message": "signup failed" }
+
+    except Exception as e:
+        print(e)
+        return {'status':"login failed", "message":e}
+
 
 
 @app.post("/create_table")
@@ -81,93 +108,72 @@ def create_table_manually():
 
 
 @app.post('/getfiles')
-async def uploadfile(myfile: list[UploadFile] = File(...), tablename : str = Form(...)):
+async def uploadfile(
+        myfile: List[UploadFile] = File(...),
+        tablename: str = Form(...)
+        ):
     print(f'tablename: {tablename}')
-    for i in myfile:
-        # content= await i.read()
-        # print(f'content:{content}')
-        file_location=f'./uploads/{i.filename}'
-        with open(file_location, 'wb') as buffer:
-            shutil.copyfileobj(i.file,buffer)
-    # await asyncio.sleep(5)
-    result = gen_code(i.filename, tablename=tablename) 
-    print('this is result: ',result)
-    if result:          
-        return result
-    else:
-        return{"status":"something went wrong"}
 
+    for uploaded_file in myfile:
+        content = await uploaded_file.read()
+        filename = uploaded_file.filename
+        ext = os.path.splitext(filename)[1].lower()
 
-def gen_code(filename,tablename):
-    try:
-        file_path='./uploads'
-        get_file=os.path.join(file_path,filename)
-        ext=os.path.splitext(get_file)[1].lower()
-        print(f'ext:{ext}')
         if ext == ".xlsx":
-            ds=pd.read_excel(f'./uploads/{filename}')
-        elif ext == '.csv':
-            ds=pd.read_csv(f'./uploads/{filename}')
+            df = pd.read_excel(io.BytesIO(content))
+        elif ext == ".csv":
+            df = pd.read_csv(io.BytesIO(content))
         else:
-            print('invaild file')
+            return {"status": f"Unsupported file type: {ext}"}
 
-        data=pd.DataFrame(ds)
-        print(data.shape)
+        result = gen_code(df, tablename, filename)
+        if not result.get("status", "").startswith("file uploaded"):
+            return result
 
-        check_column=data.columns.to_list()
-        print(check_column)
+    return {"status": "All files uploaded successfully"}
 
-        print(f'length of sheeet: {len(data)}')
-        unique_code=[]
-        for i in range(len(data)):
-            st=random.choices(string.ascii_uppercase, k=2)
-            nu=random.choices(string.digits, k=3)
-            uc= "".join(st+nu)
-            if unique_code != uc:
-                unique_code.append(uc)
-            else:
-                print('already exist')
-                continue
-        # print(unique_code)
-        # print(len(unique_code))
-        # print(unique_code)
-        # print(data)
-        
-        data.insert(1,'unique_code',unique_code)
-        with engine.connect() as conn_:
-            try:
-                data.to_sql(f'{tablename}', con=conn_ , index=False)
-                print('Data uploaded sucessfully...')
-                status_msg = {"status": "file uploaded"}
-            except Exception as e:
-                print(e)
-                return {'status':f'{e}'}
-        with engine.connect()as con:
-            try:
-                con.execute(text(f"update users set CWMS = {'true'} where username = '{tablename.split('_')[0]}'"))
-                con.commit()
-            except Exception as e:
-                return {"status":f"{e}"}
-        folder_path='./uploads'
-        for item in os.listdir(folder_path):
-            item_path = os.path.join(folder_path, item)
-            print(f'this is item_path:{item_path}')
 
-            try:
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    os.remove(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-            except Exception as e:
-                print(f"⚠️ Failed to delete '{item_path}': {e}")
-                return {"status":f'{e}'}
+def gen_code(data: pd.DataFrame, tablename: str, filename: str):
+    try:
+        print(f"Processing: {filename}")
+        print(f"Shape: {data.shape}")
+        print(f"Columns: {data.columns.tolist()}")
 
-        print(f"✅ Folder '{folder_path}' has been emptied.")
+        # Add SLNO and unique_code
+        unique_codes = set()
+        code_list = []
+        SLNO = list(range(len(data)))
 
-        return status_msg
+        while len(code_list) < len(data):
+            st = ''.join(random.choices(string.ascii_uppercase, k=2))
+            nu = ''.join(random.choices(string.digits, k=3))
+            uc = st + nu
+            if uc not in unique_codes:
+                unique_codes.add(uc)
+                code_list.append(uc)
+
+        data.insert(1, 'unique_code', code_list)
+
+        # Save to DB
+        with engine.begin() as conn:
+            data.to_sql(tablename, con=conn, index=False, if_exists='replace')
+
+            conn.execute(text(
+                f"ALTER TABLE {tablename} ADD COLUMN SLNO INT AUTO_INCREMENT PRIMARY KEY"
+            ))
+
+        # Update users table
+        with engine.begin() as conn:
+            conn.execute(text(
+                f"UPDATE users SET CWMS = 1 WHERE username = '{tablename.split('_')[0]}'"
+            ))
+
+        print("file uploaded")
+        return {"status": "file uploaded"}
     except Exception as e:
-        print(e)
-        return {"status":f'{e}'}
+        print(f"Error: {e}")
+        return {"status": str(e)}
+
 
 
 @app.get('/get_table')
@@ -183,7 +189,7 @@ def get_user_table(uid: str):
                 usertables.append(i[0])
         u_table=usertables[0]
         # print(u_table)
-        user_table=conn.execute(text(f"select * from `{u_table}` "))
+        user_table=conn.execute(text(f"select * from `{u_table}` Order by SLNO Desc"))
         columns = user_table.keys()
         rows = user_table.fetchall()
 
@@ -257,4 +263,148 @@ async def editrows(req:Request):
         'status':200, 'data':'successfully updated'
     }
 
+@app.post('/addrow')
+async def addrow(req:Request):
+    data=await req.json()
+    print(f"this is new row_data: {data['new_data']}")
+    usertables2=[]
+    with engine.connect() as conn:
+        tables = conn.execute(text(f"show tables")).fetchall()
+        for i in tables:
+            if data.get('uid') in i[0]:
+                usertables2.append(i[0])
+        print(f"this is user_table:{usertables2}")
+        u_codes=conn.execute(text(f"select unique_code from `{usertables2[0]}` ")).fetchall()
+        Existing_unique_codes=[i[0] for i in u_codes]
+        print(Existing_unique_codes)
+        st=random.choices(string.ascii_uppercase, k=2)
+        nu=random.choices(string.digits, k=3)
+        uc= "".join(st+nu)
+        new_uc=""
+        if uc not in Existing_unique_codes:
+            new_uc=uc
+            data['new_data']['unique_code']=uc
+            print(f"this is new uc: {new_uc}")
+        else:
+            new_uc="CWMS_$"
 
+        keyss=data['new_data'].keys()
+        print(f"keyss:{keyss}")
+        values = data['new_data'].values()
+        safe_values = ', '.join(f"'{str(v)}'" for v in values)
+        print(safe_values)
+        print(type(safe_values))
+        try:
+            query = f"INSERT INTO `{usertables2[0]}` ({', '.join(data['new_data'].keys())}) VALUES ({safe_values})"
+            
+            conn.execute(text(query))
+            conn.commit()
+            return{'':200,'response':'success'}
+
+        except Exception as e:
+            return{'status':400,'response':'failed'}
+
+
+@app.post("/download-template-csv")
+async def download_csv(req:Request):
+    data=await req.json()
+    uid=data['uid']
+    usertables=[]
+    with engine.connect() as conn:
+        tables=conn.execute(text(f"show tables")).fetchall()
+        print(tables)
+        for i in tables:
+            if uid in i[0]:
+                usertables.append(i[0])
+        u_table=usertables[0]
+        # print(u_table)
+        user_table=conn.execute(text(f"select * from `{u_table}` Order by SLNO Desc"))
+        columns = user_table.keys()
+        columns=[i for i in columns if i  not in ('SLNO', 'unique_code')]
+
+    df=pd.DataFrame(columns=columns)
+    csv_data = df.to_csv(index=False)
+ 
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=template.csv"}
+    )
+
+@app.post('/addnewfile')
+async def uploadnewfile(
+    mynewfile: List[UploadFile] = File(...),
+    uid: str = Form(...)
+):
+    print(f"this is user_id: {uid}")
+    for i in mynewfile:
+        content = await i.read()
+        result = store_file_from_memory(content, i.filename, uid)
+        if not result or result.get("status") != 200:
+            return {"status": "something went wrong"}
+    return {"status": 200, "message": "Files inserted successfully"}
+
+
+def store_file_from_memory(file_content, filename, uid):
+    try:
+        ext = os.path.splitext(filename)[1].lower()
+        print(f'ext: {ext}')
+        if ext == ".xlsx":
+            ds = pd.read_excel(io.BytesIO(file_content))
+        elif ext == ".csv":
+            ds = pd.read_csv(io.BytesIO(file_content))
+        else:
+            return {"status": 400, "error": "Invalid file type"}
+
+        data = pd.DataFrame(ds)
+        print(f"Data shape: {data.shape}")
+        check_rows = data.to_dict(orient='records')
+
+        # Get the user's table
+        usertables = []
+        with engine.connect() as conn:
+            tables = conn.execute(text("SHOW TABLES")).fetchall()
+            for t in tables:
+                if uid in t[0]:
+                    usertables.append(t[0])
+            if not usertables:
+                return {"status": 404, "error": "User table not found"}
+            u_table = usertables[0]
+
+            # Get existing unique_codes
+            existing_codes = conn.execute(
+                text(f"SELECT unique_code FROM `{u_table}`")
+            ).fetchall()
+            existing_codes = {row[0] for row in existing_codes}
+
+        # Generate and insert unique_code
+        all_unique_codes = set()
+        for i, row in enumerate(check_rows):
+            while True:
+                code = ''.join(random.choices(string.ascii_uppercase, k=2) + random.choices(string.digits, k=3))
+                if code not in existing_codes and code not in all_unique_codes:
+                    row['unique_code'] = code
+                    all_unique_codes.add(code)
+                    break
+                # Optional: add retry cap
+
+        insert_keys = check_rows[0].keys()
+        print(f"Inserting into table: {u_table}")
+        print(f"Keys: {insert_keys}")
+
+        with engine.begin() as conn:
+            for row in check_rows:
+                cleaned_row = {k: (None if str(v).lower() == 'nan' else v) for k, v in row.items()}
+                placeholders = ", ".join([f":{key}" for key in cleaned_row])
+                query = text(f"""
+                    INSERT INTO `{u_table}` ({', '.join(cleaned_row)})
+                    VALUES ({placeholders})
+                """)
+                conn.execute(query, cleaned_row)
+
+        print("Rows inserted successfully.")
+        return {"status": 200, "response": "success"}
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"status": 500, "error": str(e)}

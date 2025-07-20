@@ -18,15 +18,20 @@
 
 
 
-import pandas as pd
+# import pandas as pd
 
-data = {
-    "Name": ["Alice", "Bob"],
-    "Age": [30, 25],
-    "City": ["New York", "San Francisco"]
-}
+# data = {
+#     "Name": ["Alice", "Bob"],
+#     "Age": [30, 25],
+#     "City": ["New York", "San Francisco"]
+# }
 
-df = pd.DataFrame(data)
-df.to_excel("data.xlsx", index=False)
+# df = pd.DataFrame(data)
+# df.to_excel("data.xlsx", index=False)
 
-print("Excel file created successfully!")
+# print("Excel file created successfully!")
+
+letters = ['H', 'e', 'l', 'l', 'o']
+word = ', '.join(f'"{str(i)}"' for i in letters)
+print(word)
+
