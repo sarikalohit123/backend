@@ -210,7 +210,7 @@ def get_user_table(uid: str):
         # for i in rows:
         #     print(i)
         final_table=[dict(zip(columns,row)) for row in rows]
-        # print(final_table)
+        print(final_table)
 
     print(f'total res: {usertables}')
     return{'status':"fetched", "table_Data":final_table}
