@@ -201,7 +201,7 @@ def get_user_table(uid: str):
                 usertables.append(i[0])
         u_table=usertables[0]
         # print(u_table)
-        user_table=conn.execute(text(f"select * from `{u_table}` Order by SLNO Desc"))
+        user_table=conn.execute(text(f"select * from `{u_table}`"))
         columns = user_table.keys()
         rows = user_table.fetchall()
 
