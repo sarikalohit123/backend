@@ -9,3 +9,4 @@ aiofiles
 openpyxl
 xlrd
 requests
+pymysql
