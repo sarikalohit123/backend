@@ -1,4 +1,4 @@
-from fastapi import FastAPI ,Request, Response
+from fastapi import FastAPI ,Request, Response, Depends, HTTPException
 from sqlalchemy import text
 from database import engine 
 from fastapi import  UploadFile, Form, File, Query
@@ -14,9 +14,16 @@ import os
 import asyncio
 import json
 import io
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
 
-
-
+load_dotenv()
+SECRET_KEY=os.getenv("SECRET_KEY")
+ALGORITHM=os.getenv("Alg")
+print("algo: ",ALGORITHM)
+print("s_k:",SECRET_KEY)
 app = FastAPI()
 
 
@@ -52,12 +59,18 @@ async def login_user(cred: Request):
             print("Data from DB:", check_data[0])
             if check_data:
                print("user already in")
+               token_data={
+                   "sub":username,
+                   "exp":datetime.utcnow() + timedelta(days=10)
+               }
+               access_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+
                check_cwms=conn.execute(text(f"select CWMS from users where username = '{check_data[0][0]}' and pswd = '{check_data[0][1]}'")).fetchall()
                print('checking cwms',check_cwms[0][0])
                if check_cwms[0][0]=='1':
-                   return{"status":"true", "message":"CWMS created already"}
+                   return{"status":"true", "access_token": access_token, "message":"CWMS created already"}
                else:
-                   return{"status":"false", "message":"CWMS not created but registerd"}                   
+                   return{"status":"false", "access_token":access_token, "message":"CWMS not created but registerd"}                   
             else:
                 return { "status": "failed", "message": "Login failed" }
 
@@ -65,6 +78,23 @@ async def login_user(cred: Request):
         print(e)
         return {'status':"login failed", "message":e}
     
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Token verification failed")
+
+@app.get("/verify-token")
+def verify_token(username: str = Depends(get_current_user)):
+    return {"status": "valid", "username": username}
 
 
 @app.post('/signup')
@@ -200,17 +230,12 @@ def get_user_table(uid: str):
             if uid in i[0]:
                 usertables.append(i[0])
         u_table=usertables[0]
-        # print(u_table)
         user_table=conn.execute(text(f"select * from `{u_table}`"))
         columns = user_table.keys()
         rows = user_table.fetchall()
 
-        # test_table=[dict(zip(columns,rows))]
-        # print(f'this is test_table: {test_table}')
-        # for i in rows:
-        #     print(i)
+
         final_table=[dict(zip(columns,row)) for row in rows]
-        print(final_table)
 
     print(f'total res: {usertables}')
     return{'status':"fetched", "table_Data":final_table}
