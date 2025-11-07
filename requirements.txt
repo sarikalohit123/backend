@@ -1,7 +1,11 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
-pymysql 
-python-dotenv
-requests
 pandas
+python-multipart
+python-dotenv
+python-jose
+aiofiles
+openpyxl
+xlrd
+requests
